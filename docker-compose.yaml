@@ -1,0 +1,77 @@
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: task_mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+
+  redis:
+    image: redis:latest
+    container_name: task_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  task_service:
+    build: ./services/task_service
+    container_name: task_service
+    restart: always
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_URI: "mongodb://root:password@mongodb:27017/"
+    ports:
+      - "8000:8000"
+    volumes:
+      - task_service_pip_cache:/root/.cache/pip
+
+
+  # notification_service:
+  #   build: ./services/notification_service
+  #   container_name: notification_service
+  #   restart: always
+  #   depends_on:
+  #     - redis 
+  #     - task_service
+  #   environment:
+  #     REDIS_URL: "redis://redis:6379/0"
+
+  # celery_worker:
+  #   build: ./services/notification_service
+  #   container_name: celery_worker
+  #   restart: always
+  #   depends_on:
+  #     - redis
+  #     - notification_service
+  #   environment:
+  #     REDIS_URL: "redis://redis:6379/0"
+  #   command: celery -A worker.celery worker --loglevel=info
+
+  telegram_bot:
+    build: ./bot
+    container_name: telegram_bot
+    restart: always
+    depends_on:
+      - task_service
+      - redis
+    environment:
+      TELEGRAM_TOKEN: "7997208113:AAFFBE5h7YG4dn9S31-_1y9MPY9nfeM2cFE"
+      TASK_SERVICE_URL: "http://task_service:8000" # Адрес task_service в Docker-сети
+      REDIS_URL: "redis://redis:6379/0" # Адрес Redis в Docker-сети
+    ports:
+      - "5000:5000" # Порт для доступа к API бота (если нужно)
+    command: python /app/main.py # Убедись, что указал правильный путь к файлу бота
+
+volumes:
+  mongodb_data:
+  redis_data:
+  task_service_pip_cache:
