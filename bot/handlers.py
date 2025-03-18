@@ -190,10 +190,34 @@ async def process_field_selection(callback: types.CallbackQuery, state: FSMConte
 
     await state.update_data(field=selected_field)
 
-    if selected_field != "completed":
-        await callback.message.answer(f"Введите новое значение для {selected_field}:")
+    if selected_field == "completed":
+        user_data = await state.get_data()
+        task_id = user_data["task_id"]
+        response = requests.get(f"{TASK_SERVICE_URL}/tasks/{task_id}")
+        if response.status_code != 200:
+            callback.message.answer(
+                "Ошибка при обновлении задач (completed status getting error)"
+            )
+            return
+        task = response.json()
+        new_value = not task["completed"]
+        update_data = {selected_field: new_value}
+        try:
+            response = requests.put(
+                f"{TASK_SERVICE_URL}/tasks/{task_id}", json=update_data
+            )
+            if response.status_code == 200:
+                await callback.message.answer(f"✅ Задача {task_id} успешно обновлена!")
+            else:
+                await callback.message.answer("❌ Ошибка при обновлении задачи.")
+        except Exception as e:
+            await callback.message.answer(f"❌ Ошибка: {str(e)}")
 
-    await state.set_state(UpdateTaskForm.new_value)
+        await state.clear()  # Очистка состояния
+
+    else:
+        await callback.message.answer(f"Введите новое значение для {selected_field}:")
+        await state.set_state(UpdateTaskForm.new_value)
     await callback.answer()  # Закрываем инлайн-клавиатуру
 
 
@@ -203,25 +227,13 @@ async def process_new_value(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     task_id = user_data["task_id"]
     field = user_data["field"]
-    if field == "completed":
-        response = requests.get(f"{TASK_SERVICE_URL}/tasks/{task_id}")
-        if response.status_code != 200:
-            message.answer(
-                "Ошибка при обновлении задач (completed status getting error)"
-            )
+    new_value = message.text.strip()
+    if field == "deadline":
+        try:
+            new_value = datetime.strptime(new_value, "%Y-%m-%d %H:%M").isoformat()
+        except ValueError:
+            await message.answer("Неверный формат даты. Используйте: YYYY-MM-DD HH:MM")
             return
-        task = response.json()
-        new_value = not task["completed"]
-    else:
-        new_value = message.text.strip()
-        if field == "deadline":
-            try:
-                new_value = datetime.strptime(new_value, "%Y-%m-%d %H:%M").isoformat()
-            except ValueError:
-                await message.answer(
-                    "Неверный формат даты. Используйте: YYYY-MM-DD HH:MM"
-                )
-                return
 
     # Формируем данные для обновления
     update_data = {field: new_value}
