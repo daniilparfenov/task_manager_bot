@@ -32,18 +32,48 @@ async def cmd_get_tasks(message: types.Message):
         response.raise_for_status()  # Проверяем HTTP-ошибки
 
         tasks_data = response.json()
+        now = datetime.now()
+        overdue_count = 0  # Счетчик просроченных задач
 
         if tasks_data:
-            task_list = "\n\n".join(
-                [
-                    f"🆔 {task.get('id', 'N/A')} | \n📌 {task.get('title', 'Без названия')}\n"
-                    f"📄 {task.get('description', 'Без описания')}\n"
-                    f"⏳ {datetime.fromisoformat(task['deadline']).strftime('%Y-%m-%d %H:%M') if 'deadline' in task else 'Не указано'}\n"
-                    f"✅ {'Выполнено' if task.get('completed', False) else 'Не выполнено'}"
-                    for task in tasks_data
-                ]
+            task_list = []  # Список строк с задачами
+            for task in tasks_data:
+                task_id = task.get("id", "N/A")
+                title = task.get("title", "Без названия")
+                description = task.get("description", "Без описания")
+                isCompleted = task.get("completed", False)
+
+                deadline = datetime.fromisoformat(task["deadline"])
+                deadline_str = deadline.strftime("%Y-%m-%d %H:%M")
+                if isCompleted:
+                     time_left = "🎉 Выполнено, дедлайн уже не важен ;)"
+                elif deadline < now:
+                    overdue_count += 1
+                    time_left = "❌ Просрочено"
+                else:
+                    days_left = int((deadline - now).total_seconds() // 86400)
+                    hours_left = int(((deadline - now).total_seconds() % 86400) // 3600)
+                    time_left = f"Осталось: {days_left} д. {hours_left} ч."
+
+                status = "Выполнено" if isCompleted else "Не выполнено"
+
+                task_info = (
+                    f"🆔 {task_id} | \n📌 {title}\n"
+                    f"📄 {description}\n"
+                    f"⏳ {deadline_str}\n"
+                    f"⏱ {time_left}\n"
+                    f"✅ {status}"
+                )
+
+                task_list.append(task_info)
+            # Добавляем в начало сообщение о количестве просроченных задач
+            deadline_summary = (
+                f"❗️Количество просроченных задач: {overdue_count}.\n\n"
+                if overdue_count > 0
+                else ""
             )
-            await message.answer(f"📋 Твои задачи:\n\n{task_list}")
+            final_message = deadline_summary + "\n\n".join(task_list)
+            await message.answer(final_message)
         else:
             await message.answer("✅ У тебя нет активных задач!")
 
