@@ -46,7 +46,7 @@ async def cmd_get_tasks(message: types.Message):
                 deadline = datetime.fromisoformat(task["deadline"])
                 deadline_str = deadline.strftime("%Y-%m-%d %H:%M")
                 if isCompleted:
-                     time_left = "🎉 Выполнено, дедлайн уже не важен ;)"
+                    time_left = "🎉 Выполнено, дедлайн уже не важен ;)"
                 elif deadline < now:
                     overdue_count += 1
                     time_left = "❌ Просрочено"

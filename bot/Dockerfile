@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt /app/
 
 # Устанавливаем зависимости
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 
 # Копируем код бота в контейнер
 COPY . /app/

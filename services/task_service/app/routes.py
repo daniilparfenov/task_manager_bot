@@ -2,7 +2,9 @@ from fastapi import APIRouter, HTTPException, Query
 from app.database import tasks_collection
 from app.models import TaskModel
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
+import requests
+from .config import NOTIFICATION_SERVICE_URL
 
 router = APIRouter()
 
@@ -39,6 +41,12 @@ async def create_task(task: TaskModel):
     task_data = task.dict()
     task_data["created_at"] = datetime.utcnow()
     result = await tasks_collection.insert_one(task_data)
+    await schedule_reminder(
+        user_id=task_data["user_id"],
+        task_id=str(task_data["_id"]),
+        title=task_data["title"],
+        deadline=str(task_data["deadline"]),
+    )
     return {"id": str(result.inserted_id)}
 
 
@@ -54,13 +62,75 @@ async def update_task(task_id: str, update_dict: dict):
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Задача не найдена")
 
+    try:
+        found = await tasks_collection.find({"_id": ObjectId(task_id)}).to_list(None)
+
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/cancel_deadline_reminder/{task_id}"
+        )
+        response.raise_for_status()
+
+        task = found[0]
+        await schedule_reminder(
+            task["user_id"], task_id, task["title"], update_dict["deadline"]
+        )
+    except requests.RequestException as e:
+        print("Ошибка отмены уведомления о дедлайне в celery")
+
     return {"message": "Задача обновлена"}
 
 
 # Удаление задачи
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str):
+    try:
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/cancel_deadline_reminder/{task_id}"
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print("Ошибка отмены уведомления о дедлайне в celery")
     result = await tasks_collection.delete_one({"_id": ObjectId(task_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     return {"message": "Задача удалена"}
+
+
+# Отправляет запрос в notification_service для установки напоминания
+async def schedule_reminder(user_id: str, task_id: str, title: str, deadline: str):
+    """Отправка запроса в notification_service на напоминание"""
+    payload = {
+        "user_id": user_id,
+        "task_id": task_id,
+        "title": title,
+        "deadline": deadline,
+    }
+    try:
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/schedule_deadline_reminder", params=payload
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Ошибка при отправке запроса в notification_service: {e}")
+
+
+# Пролонгировать задачу
+@router.post("/extend_task/{task_id}")
+async def extend_task(task_id: str, day_count: int = Query(...)):
+    """Продлевает задачу на 1 день после дедлайна"""
+    task = await tasks_collection.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+
+    new_deadline = datetime.utcnow() + timedelta(days=day_count)
+
+    await tasks_collection.update_one(
+        {"_id": ObjectId(task_id)}, {"$set": {"deadline": new_deadline.isoformat()}}
+    )
+
+    # Перезапускаем напоминание для обновленного дедлайна
+    await schedule_reminder(
+        task["user_id"], task_id, task["title"], new_deadline.isoformat()
+    )
+
+    return {"message": f"Дедлайн задачи {task_id} продлен до {new_deadline}"}

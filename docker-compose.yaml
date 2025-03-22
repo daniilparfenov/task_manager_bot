@@ -27,34 +27,40 @@ services:
     restart: always
     depends_on:
       - mongodb
+      - redis
     environment:
       MONGO_URI: "mongodb://root:password@mongodb:27017/"
+      NOTIFICATION_SERVICE_URL: "http://notification_service:8000"
     ports:
       - "8000:8000"
     volumes:
       - task_service_pip_cache:/root/.cache/pip
 
+  notification_service:
+    build: ./services/notification_service
+    container_name: notification_service
+    restart: always
+    depends_on:
+      - redis
+    ports:
+      - "8001:8000"
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+      TELEGRAM_BOT_TOKEN: "7997208113:AAFFBE5h7YG4dn9S31-_1y9MPY9nfeM2cFE"
+      TASK_SERVICE_URL: "http://task_service:8000"
 
-  # notification_service:
-  #   build: ./services/notification_service
-  #   container_name: notification_service
-  #   restart: always
-  #   depends_on:
-  #     - redis 
-  #     - task_service
-  #   environment:
-  #     REDIS_URL: "redis://redis:6379/0"
-
-  # celery_worker:
-  #   build: ./services/notification_service
-  #   container_name: celery_worker
-  #   restart: always
-  #   depends_on:
-  #     - redis
-  #     - notification_service
-  #   environment:
-  #     REDIS_URL: "redis://redis:6379/0"
-  #   command: celery -A worker.celery worker --loglevel=info
+  celery_worker:
+    build: ./services/notification_service
+    container_name: celery_worker
+    restart: always
+    depends_on:
+      - redis
+      - notification_service
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+      TASK_SERVICE_URL: "http://task_service:8000"
+      TELEGRAM_BOT_TOKEN: "7997208113:AAFFBE5h7YG4dn9S31-_1y9MPY9nfeM2cFE"
+    command: celery -A celery_tasks worker --loglevel=info
 
   telegram_bot:
     build: ./bot
@@ -62,7 +68,7 @@ services:
     restart: always
     depends_on:
       - task_service
-      - redis
+      - notification_service
     environment:
       TELEGRAM_TOKEN: "7997208113:AAFFBE5h7YG4dn9S31-_1y9MPY9nfeM2cFE"
       TASK_SERVICE_URL: "http://task_service:8000" # Адрес task_service в Docker-сети
