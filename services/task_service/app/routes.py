@@ -13,6 +13,16 @@ from bson import ObjectId
 
 
 def task_serializer(task) -> dict:
+    if ("notification" in task):
+        return {
+            "id": str(task["_id"]),
+            "user_id": str(task["user_id"]),
+            "title": task["title"],
+            "description": task.get("description", ""),
+            "deadline": task.get("deadline"),
+            "completed": task.get("completed", False),
+            "notification": task.get("completed", "None"),
+        }
     return {
         "id": str(task["_id"]),
         "user_id": str(task["user_id"]),
@@ -20,6 +30,7 @@ def task_serializer(task) -> dict:
         "description": task.get("description", ""),
         "deadline": task.get("deadline"),
         "completed": task.get("completed", False),
+        "notification": "None"
     }
 
 
@@ -87,14 +98,69 @@ async def update_task(task_id: str, update_dict: dict):
     return {"message": "Задача обновлена"}
 
 
+# Создание напоминания пользователя
+@router.post("/notification_reminder")
+async def create_notification(
+    task_id: str,
+    user_id: str,
+    title: str,
+    date: str
+):
+    
+    result = tasks_collection.update_one({"_id": ObjectId(task_id)}, {"$set": {"notification": date}})
+
+    payload = {
+        "user_id": user_id,
+        "task_id": task_id,
+        "title": title,
+        "date": date,
+    }
+
+    try:
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/schedule_notification_reminder", params=payload
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.exception(f"\nОшибка при отправке запроса в notification_service: {e}\n")
+
+
+@router.post("/delete_notification_reminder")
+async def delete_notification(
+    task_id: str,
+):
+    
+    result = tasks_collection.update_one({"_id": ObjectId(task_id)}, {"$unset": {"notification": "None"}})
+
+    payload = {
+        "task_id": task_id,
+    }
+
+    try:
+        response = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/cancel_notification_reminder/{task_id}", params=payload
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logging.exception(f"\nОшибка при отправке запроса в notification_service: {e}\n")
+
+
 # Удаление задачи
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str):
+    task = await tasks_collection.find_one({"_id": ObjectId(task_id)})
+    if not task:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    logging.exception(f"\n\n{task}\n\n")
     try:
         response = requests.post(
             f"{NOTIFICATION_SERVICE_URL}/cancel_deadline_reminder/{task_id}"
         )
         response.raise_for_status()
+        resp = requests.post(
+            f"{NOTIFICATION_SERVICE_URL}/cancel_notification_reminder/{task_id}"
+        )
+        resp.raise_for_status()
     except requests.RequestException as e:
         print("Ошибка отмены уведомления о дедлайне в celery")
     result = await tasks_collection.delete_one({"_id": ObjectId(task_id)})
@@ -161,6 +227,15 @@ async def delete_task_by_deadline(user_id: int = Query(...), deadline_time: str 
             response.raise_for_status()
         except requests.RequestException as e:
             print("Ошибка отмены уведомления о дедлайне в celery")
+    for task in result:
+        if "notification" in task:
+            try:
+                response = requests.post(
+                    f"{NOTIFICATION_SERVICE_URL}/cancel_notification_reminder/{task["_id"]}"
+                )
+                response.raise_for_status()
+            except requests.RequestException as e:
+                print("Ошибка отмены уведомления о дедлайне в celery")
 
     logging.exception(
         f"\n\n{result}\n\n"

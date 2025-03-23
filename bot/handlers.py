@@ -171,6 +171,22 @@ async def process_description(message: types.Message, state: FSMContext):
     await state.clear()
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @router.message(Command("delete_task"))
 async def cmd_delete_task(message: types.Message):
     """Удалить задачу по ID"""
@@ -301,6 +317,11 @@ async def delete_task_by_deadline(message: types.Message):
     """Удаление задачи по указанному дедлайну."""
     user_id = message.from_user.id
     args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "Используйте формат: /add_task task_title deadline (YYYY-MM-DD)"
+        )
+        return
     ans = args[1]
     parts = ans.rsplit(maxsplit=2)
     if len(parts) != 1:
@@ -323,4 +344,118 @@ async def delete_task_by_deadline(message: types.Message):
         await message.reply("Неверный формат даты. Используйте формат YYYY-MM-DD")
     except Exception as e:
         await message.answer("Ошибка при удалении задачи.")
+        logging.error(e)
+
+
+@router.message(Command("add_notification"))
+async def add_notification(message: types.Message):
+    """Добавление уведмления пользователя"""
+    user_id = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "Используйте формат: /add_notification task_id date (YYYY-MM-DD HH:MM)"
+        )
+        return
+    ans = args[1]
+    parts = ans.rsplit(maxsplit=2)
+    if len(parts) != 3:
+        await message.answer(
+            "Используйте формат: /add_notification task_id date (YYYY-MM-DD HH:MM)"
+        )
+        return
+    task_id, task_deadline = parts[0], parts[1] + " " + parts[2]
+    tasks = requests.get(
+        f"{TASK_SERVICE_URL}/tasks/{task_id}", params={"task_id": task_id}
+    )
+    logging.exception(f"\n\n{tasks.json()}\n\n")
+    if (len(tasks.json()) == 0):
+        await message.reply("Задач с таким Id не найдено.")
+        return
+    task = tasks.json()
+    logging.exception(f"\n\n{task}\n\n")
+    logging.exception(f"\n\n{'notification' in task}\n\n")
+    if task["notification"] != "None":
+        await message.reply("Уже существует напоминание для этой задачи.")
+        return
+    logging.exception(f"\n\n{tasks}\n\n")
+    try:
+        try:
+            task_deadline = datetime.strptime(task_deadline, "%Y-%m-%d %H:%M")
+            task_deadline = MOSCOW_TZ.localize(task_deadline).astimezone(pytz.UTC).isoformat()
+        except ValueError:
+            await message.answer("Неверный формат даты. Используйте: YYYY-MM-DD HH:MM")
+            return
+
+        
+        resp = requests.post(
+            f"{TASK_SERVICE_URL}/notification_reminder", params={
+                "task_id": task_id,
+                "user_id": user_id,
+                "title": task["title"],
+                "date": task_deadline
+            }
+        )
+        logging.exception(f"\n\n{resp}\n\n")
+        if resp.status_code == 200:
+            await message.reply(f"Напоминание по задаче \"{task["title"]}\" в {task_deadline} добавлено.")
+        elif resp.status_code == 404:
+            await message.reply("Задач с таким Id не найдено.")
+        else:
+            await message.reply("Произошла ошибка при попытке добавления уведомления.")
+    except ValueError:
+        await message.reply("Неверный формат даты. Используйте формат YYYY-MM-DD")
+    except Exception as e:
+        await message.answer("Ошибка при создании напоминания.")
+        logging.error(e)
+
+
+@router.message(Command("delete_notification"))
+async def delete_notification(message: types.Message):
+    """Удаление уведоления пользователя"""
+    user_id = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "Используйте формат: /delete_notification task_id"
+        )
+        return
+    ans = args[1]
+    parts = ans.rsplit(maxsplit=2)
+    if len(parts) != 1:
+        await message.answer(
+            "Используйте формат: /add_notification task_id"
+        )
+        return
+    task_id = parts[0]
+    tasks = requests.get(
+        f"{TASK_SERVICE_URL}/tasks/{task_id}", params={"task_id": task_id}
+    )
+    logging.exception(f"\n\n{tasks.json()}\n\n")
+    if (len(tasks.json()) == 0):
+        await message.reply("Задач с таким Id не найдено.")
+        return
+    task = tasks.json()
+    logging.exception(f"\n\n{task}\n\n")
+    if task["notification"] == "None":
+        await message.reply("У этой задачи нет напоминания")
+        return
+    logging.exception(f"\n\n{tasks}\n\n")
+    try:
+        resp = requests.post(
+            f"{TASK_SERVICE_URL}/delete_notification_reminder", params={
+                "task_id": task_id,
+            }
+        )
+        logging.exception(f"\n\n{resp}\n\n")
+        if resp.status_code == 200:
+            await message.reply(f"Напоминание по задаче \"{task["title"]}\" было удалено.")
+        elif resp.status_code == 404:
+            await message.reply("Задач с таким Id не найдено.")
+        else:
+            await message.reply("Произошла ошибка при попытке добавления уведомления.")
+    except ValueError:
+        await message.reply("Неверный формат даты. Используйте формат YYYY-MM-DD")
+    except Exception as e:
+        await message.answer("Ошибка при создании напоминания.")
         logging.error(e)

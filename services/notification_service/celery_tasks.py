@@ -28,3 +28,16 @@ def send_overdue_deadline_reminder(user_id: str, task_id: str, title: str):
         response.raise_for_status()
     except requests.RequestException as e:
         print(f"Ошибка при отправке напоминания в Telegram: {e}")
+
+
+@celery_app.task
+def send_notification_reminder(user_id: str, title: str):
+    """Отправка напоминания, которое захотел пользователь"""
+
+    text = f"🔔 Вы просили напомнить, что у вас скоро дедлайн по задаче \"{title}\"!!!"
+    payload = {"chat_id": user_id, "text": text}
+    try:
+        response = requests.post(TELEGRAM_API_TO_SEND_MESSAGE_URL, json=payload)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Ошибка при отправке напоминания в Telegram: {e}")
