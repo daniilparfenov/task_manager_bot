@@ -21,9 +21,7 @@ def send_overdue_deadline_reminder(user_id: str, task_id: str, title: str):
         raise Exception("Ошибка продления дедлайна задачи")
         return
 
-    text = (
-        f'🔔 Дедлайн по задаче "{title}" подошел к концу! Пролонгировано на 1 день'
-    )
+    text = f'🔔 Дедлайн по задаче "{title}" подошел к концу! Пролонгировано на 1 день'
     payload = {"chat_id": user_id, "text": text}
     try:
         response = requests.post(TELEGRAM_API_TO_SEND_MESSAGE_URL, json=payload)

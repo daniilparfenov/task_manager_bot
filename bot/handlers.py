@@ -2,7 +2,7 @@ import requests
 import logging
 from aiogram import Router, types
 from aiogram.filters import Command
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import TASK_SERVICE_URL
 import pytz
 from models import TaskModel
@@ -11,6 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 router = Router()
+MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 
 @router.message(Command("start"))
@@ -32,7 +33,8 @@ async def cmd_get_tasks(message: types.Message):
         response.raise_for_status()  # Проверяем HTTP-ошибки
 
         tasks_data = response.json()
-        now = datetime.now()
+
+        now = datetime.now(tz=MOSCOW_TZ)
         overdue_count = 0  # Счетчик просроченных задач
 
         if tasks_data:
@@ -43,7 +45,9 @@ async def cmd_get_tasks(message: types.Message):
                 description = task.get("description", "Без описания")
                 isCompleted = task.get("completed", False)
 
-                deadline = datetime.fromisoformat(task["deadline"])
+                deadline = datetime.fromisoformat(task["deadline"]).astimezone(
+                    MOSCOW_TZ
+                )
                 deadline_str = deadline.strftime("%Y-%m-%d %H:%M")
                 if isCompleted:
                     time_left = "🎉 Выполнено, дедлайн уже не важен ;)"
@@ -114,7 +118,9 @@ async def cmd_add_task(message: types.Message, state: FSMContext):
 
     task_title, task_deadline = parts[0], parts[1] + " " + parts[2]
     try:
+
         task_deadline = datetime.strptime(task_deadline, "%Y-%m-%d %H:%M")
+        task_deadline = MOSCOW_TZ.localize(task_deadline).astimezone(pytz.UTC)
     except ValueError:
         await message.answer("Неверный формат даты. Используйте: YYYY-MM-DD HH:MM")
         return
@@ -260,7 +266,9 @@ async def process_new_value(message: types.Message, state: FSMContext):
     new_value = message.text.strip()
     if field == "deadline":
         try:
-            new_value = datetime.strptime(new_value, "%Y-%m-%d %H:%M").isoformat()
+            new_value = datetime.strptime(new_value, "%Y-%m-%d %H:%M")
+
+            new_value = MOSCOW_TZ.localize(new_value).astimezone(pytz.UTC).isoformat()
         except ValueError:
             await message.answer("Неверный формат даты. Используйте: YYYY-MM-DD HH:MM")
             return
