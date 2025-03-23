@@ -37,6 +37,10 @@ async def cmd_get_tasks(message: types.Message):
         now = datetime.now(tz=MOSCOW_TZ)
         overdue_count = 0  # Счетчик просроченных задач
 
+        logging.exception(
+            f"\n\n{tasks_data}\n\n"
+        )
+
         if tasks_data:
             task_list = []  # Список строк с задачами
             for task in tasks_data:
@@ -118,7 +122,6 @@ async def cmd_add_task(message: types.Message, state: FSMContext):
 
     task_title, task_deadline = parts[0], parts[1] + " " + parts[2]
     try:
-
         task_deadline = datetime.strptime(task_deadline, "%Y-%m-%d %H:%M")
         task_deadline = MOSCOW_TZ.localize(task_deadline).astimezone(pytz.UTC)
     except ValueError:
@@ -291,3 +294,33 @@ async def process_new_value(message: types.Message, state: FSMContext):
 def register_handlers(dp):
     """Регистрируем все обработчики команд."""
     dp.include_router(router)
+
+
+@router.message(Command("delete_task_by_time"))
+async def delete_task_by_deadline(message: types.Message):
+    """Удаление задачи по указанному дедлайну."""
+    user_id = message.from_user.id
+    args = message.text.split(maxsplit=1)
+    ans = args[1]
+    parts = ans.rsplit(maxsplit=2)
+    if len(parts) != 1:
+        await message.answer(
+            "Используйте формат: /add_task task_title deadline (YYYY-MM-DD)"
+        )
+        return
+    try:
+        deadline_str = parts[0]
+        resp = requests.delete(
+            f"{TASK_SERVICE_URL}/tasks", params={"user_id": user_id, "deadline_time": deadline_str}
+        )
+        if resp.status_code == 200:
+            await message.reply(f"Задачи с дедлайном в {deadline_str} удалены.")
+        elif resp.status_code == 404:
+            await message.reply("Задач с таким дедлайном не найдено.")
+        else:
+            await message.reply("Произошла ошибка при попытке удаления задачи.")
+    except ValueError:
+        await message.reply("Неверный формат даты. Используйте формат YYYY-MM-DD")
+    except Exception as e:
+        await message.answer("Ошибка при удалении задачи.")
+        logging.error(e)

@@ -5,6 +5,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta
 import requests
 from .config import NOTIFICATION_SERVICE_URL
+import logging
 
 router = APIRouter()
 
@@ -26,12 +27,18 @@ def task_serializer(task) -> dict:
 @router.get("/tasks")
 async def get_tasks(user_id: int = Query(...)):
     tasks = await tasks_collection.find({"user_id": user_id}).to_list(None)
+    logging.exception(
+        f"\n\n{tasks}\n\n"
+    )
     return [task_serializer(task) for task in tasks]
 
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
     tasks = await tasks_collection.find({"_id": ObjectId(task_id)}).to_list(None)
+    logging.exception(
+        f"\n\n{tasks}\n\n"
+    )
     return [task_serializer(task) for task in tasks][0]
 
 
@@ -125,7 +132,7 @@ async def extend_task(task_id: str, day_count: int = Query(...)):
     new_deadline = datetime.utcnow() + timedelta(days=day_count)
 
     await tasks_collection.update_one(
-        {"_id": ObjectId(task_id)}, {"$set": {"deadline": new_deadline.isoformat()}}
+        {"_id": ObjectId(task_id)}, {"$set": {"deadline": new_deadline}}
     )
 
     # Перезапускаем напоминание для обновленного дедлайна
@@ -134,3 +141,33 @@ async def extend_task(task_id: str, day_count: int = Query(...)):
     )
 
     return {"message": f"Дедлайн задачи {task_id} продлен до {new_deadline}"}
+
+
+@router.delete("/tasks")
+async def delete_task_by_deadline(user_id: int = Query(...), deadline_time: str = Query(...)):
+    logging.exception(f"user_id: {user_id} \n deadline: {deadline_time}")
+    target_date = datetime.strptime(deadline_time, "%Y-%m-%d")
+    start_day = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0) - timedelta(hours=3)
+    end_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59) - timedelta(hours=3)
+    logging.exception(f"\n\nstart_day={start_day}, end_day={end_day}\n\n")
+    result = await tasks_collection.find(
+        {"user_id": user_id, "deadline": {"$gte": start_day, "$lte": end_day}}
+    ).to_list()
+    for task in result:
+        try:
+            response = requests.post(
+                f"{NOTIFICATION_SERVICE_URL}/cancel_deadline_reminder/{task["_id"]}"
+            )
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print("Ошибка отмены уведомления о дедлайне в celery")
+
+    logging.exception(
+        f"\n\n{result}\n\n"
+    )
+    result = await tasks_collection.delete_many(
+        {"user_id": user_id, "deadline": {"$gte": start_day, "$lte": end_day}}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    return {"message": "Задачи удалены"}
