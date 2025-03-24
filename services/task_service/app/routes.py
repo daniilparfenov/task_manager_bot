@@ -1,11 +1,13 @@
-from fastapi import APIRouter, HTTPException, Query
+import logging
+from datetime import datetime, timedelta
+
+import requests
 from app.database import tasks_collection
 from app.models import TaskModel
 from bson import ObjectId
-from datetime import datetime, timedelta
-import requests
+from fastapi import APIRouter, HTTPException, Query
+
 from .config import NOTIFICATION_SERVICE_URL
-import logging
 
 router = APIRouter()
 
@@ -13,16 +15,6 @@ from bson import ObjectId
 
 
 def task_serializer(task) -> dict:
-    if ("notification" in task):
-        return {
-            "id": str(task["_id"]),
-            "user_id": str(task["user_id"]),
-            "title": task["title"],
-            "description": task.get("description", ""),
-            "deadline": task.get("deadline"),
-            "completed": task.get("completed", False),
-            "notification": task.get("completed", "None"),
-        }
     return {
         "id": str(task["_id"]),
         "user_id": str(task["user_id"]),
@@ -30,7 +22,7 @@ def task_serializer(task) -> dict:
         "description": task.get("description", ""),
         "deadline": task.get("deadline"),
         "completed": task.get("completed", False),
-        "notification": "None"
+        "notification": task.get("notification", None),
     }
 
 
@@ -38,18 +30,14 @@ def task_serializer(task) -> dict:
 @router.get("/tasks")
 async def get_tasks(user_id: int = Query(...)):
     tasks = await tasks_collection.find({"user_id": user_id}).to_list(None)
-    logging.exception(
-        f"\n\n{tasks}\n\n"
-    )
+    logging.exception(f"\n\n{tasks}\n\n")
     return [task_serializer(task) for task in tasks]
 
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
     tasks = await tasks_collection.find({"_id": ObjectId(task_id)}).to_list(None)
-    logging.exception(
-        f"\n\n{tasks}\n\n"
-    )
+    logging.exception(f"\n\n{tasks}\n\n")
     return [task_serializer(task) for task in tasks][0]
 
 
@@ -100,14 +88,11 @@ async def update_task(task_id: str, update_dict: dict):
 
 # Создание напоминания пользователя
 @router.post("/notification_reminder")
-async def create_notification(
-    task_id: str,
-    user_id: str,
-    title: str,
-    date: str
-):
-    
-    result = tasks_collection.update_one({"_id": ObjectId(task_id)}, {"$set": {"notification": date}})
+async def create_notification(task_id: str, user_id: str, title: str, date: str):
+
+    result = tasks_collection.update_one(
+        {"_id": ObjectId(task_id)}, {"$set": {"notification": date}}
+    )
 
     payload = {
         "user_id": user_id,
@@ -122,15 +107,19 @@ async def create_notification(
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        logging.exception(f"\nОшибка при отправке запроса в notification_service: {e}\n")
+        logging.exception(
+            f"\nОшибка при отправке запроса в notification_service: {e}\n"
+        )
 
 
 @router.post("/delete_notification_reminder")
 async def delete_notification(
     task_id: str,
 ):
-    
-    result = tasks_collection.update_one({"_id": ObjectId(task_id)}, {"$unset": {"notification": "None"}})
+
+    result = tasks_collection.update_one(
+        {"_id": ObjectId(task_id)}, {"$unset": {"notification": "None"}}
+    )
 
     payload = {
         "task_id": task_id,
@@ -138,11 +127,14 @@ async def delete_notification(
 
     try:
         response = requests.post(
-            f"{NOTIFICATION_SERVICE_URL}/cancel_notification_reminder/{task_id}", params=payload
+            f"{NOTIFICATION_SERVICE_URL}/cancel_notification_reminder/{task_id}",
+            params=payload,
         )
         response.raise_for_status()
     except requests.RequestException as e:
-        logging.exception(f"\nОшибка при отправке запроса в notification_service: {e}\n")
+        logging.exception(
+            f"\nОшибка при отправке запроса в notification_service: {e}\n"
+        )
 
 
 # Удаление задачи
@@ -210,11 +202,17 @@ async def extend_task(task_id: str, day_count: int = Query(...)):
 
 
 @router.delete("/tasks")
-async def delete_task_by_deadline(user_id: int = Query(...), deadline_time: str = Query(...)):
+async def delete_task_by_deadline(
+    user_id: int = Query(...), deadline_time: str = Query(...)
+):
     logging.exception(f"user_id: {user_id} \n deadline: {deadline_time}")
     target_date = datetime.strptime(deadline_time, "%Y-%m-%d")
-    start_day = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0) - timedelta(hours=3)
-    end_day = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59) - timedelta(hours=3)
+    start_day = datetime(
+        target_date.year, target_date.month, target_date.day, 0, 0, 0
+    ) - timedelta(hours=3)
+    end_day = datetime(
+        target_date.year, target_date.month, target_date.day, 23, 59, 59
+    ) - timedelta(hours=3)
     logging.exception(f"\n\nstart_day={start_day}, end_day={end_day}\n\n")
     result = await tasks_collection.find(
         {"user_id": user_id, "deadline": {"$gte": start_day, "$lte": end_day}}
@@ -237,9 +235,7 @@ async def delete_task_by_deadline(user_id: int = Query(...), deadline_time: str 
             except requests.RequestException as e:
                 print("Ошибка отмены уведомления о дедлайне в celery")
 
-    logging.exception(
-        f"\n\n{result}\n\n"
-    )
+    logging.exception(f"\n\n{result}\n\n")
     result = await tasks_collection.delete_many(
         {"user_id": user_id, "deadline": {"$gte": start_day, "$lte": end_day}}
     )

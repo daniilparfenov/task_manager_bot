@@ -1,14 +1,14 @@
-import requests
 import logging
+from datetime import datetime, timedelta
+
+import pytz
+import requests
 from aiogram import Router, types
 from aiogram.filters import Command
-from datetime import datetime, timedelta
-from config import TASK_SERVICE_URL
-import pytz
-from models import TaskModel
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
+from config import TASK_SERVICE_URL
+from models import TaskModel
 
 router = Router()
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
@@ -37,9 +37,7 @@ async def cmd_get_tasks(message: types.Message):
         now = datetime.now(tz=MOSCOW_TZ)
         overdue_count = 0  # Счетчик просроченных задач
 
-        logging.exception(
-            f"\n\n{tasks_data}\n\n"
-        )
+        logging.exception(f"\n\n{tasks_data}\n\n")
 
         if tasks_data:
             task_list = []  # Список строк с задачами
@@ -63,6 +61,10 @@ async def cmd_get_tasks(message: types.Message):
                     hours_left = int(((deadline - now).total_seconds() % 86400) // 3600)
                     time_left = f"Осталось: {days_left} д. {hours_left} ч."
 
+                if task.get("notification") is None:
+                    notification_time = "Нет напоминания"
+                else:
+                    notification_time = datetime.fromisoformat(task.get("notification"))
                 status = "Выполнено" if isCompleted else "Не выполнено"
 
                 task_info = (
@@ -70,6 +72,7 @@ async def cmd_get_tasks(message: types.Message):
                     f"📄 {description}\n"
                     f"⏳ {deadline_str}\n"
                     f"⏱ {time_left}\n"
+                    f"🔔 {notification_time}\n"
                     f"✅ {status}"
                 )
 
@@ -169,22 +172,6 @@ async def process_description(message: types.Message, state: FSMContext):
 
     # Завершаем процесс и очищаем состояние
     await state.clear()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @router.message(Command("delete_task"))
@@ -312,27 +299,28 @@ def register_handlers(dp):
     dp.include_router(router)
 
 
-@router.message(Command("delete_task_by_time"))
+@router.message(Command("delete_tasks_by_deadline"))
 async def delete_task_by_deadline(message: types.Message):
     """Удаление задачи по указанному дедлайну."""
     user_id = message.from_user.id
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
-            "Используйте формат: /add_task task_title deadline (YYYY-MM-DD)"
+            "Используйте формат: /delete_tasks_by_deadline deadline (YYYY-MM-DD)"
         )
         return
     ans = args[1]
     parts = ans.rsplit(maxsplit=2)
     if len(parts) != 1:
         await message.answer(
-            "Используйте формат: /add_task task_title deadline (YYYY-MM-DD)"
+            "Используйте формат: /delete_tasks_by_deadline deadline (YYYY-MM-DD)"
         )
         return
     try:
         deadline_str = parts[0]
         resp = requests.delete(
-            f"{TASK_SERVICE_URL}/tasks", params={"user_id": user_id, "deadline_time": deadline_str}
+            f"{TASK_SERVICE_URL}/tasks",
+            params={"user_id": user_id, "deadline_time": deadline_str},
         )
         if resp.status_code == 200:
             await message.reply(f"Задачи с дедлайном в {deadline_str} удалены.")
@@ -369,36 +357,40 @@ async def add_notification(message: types.Message):
         f"{TASK_SERVICE_URL}/tasks/{task_id}", params={"task_id": task_id}
     )
     logging.exception(f"\n\n{tasks.json()}\n\n")
-    if (len(tasks.json()) == 0):
+    if len(tasks.json()) == 0:
         await message.reply("Задач с таким Id не найдено.")
         return
     task = tasks.json()
     logging.exception(f"\n\n{task}\n\n")
     logging.exception(f"\n\n{'notification' in task}\n\n")
-    if task["notification"] != "None":
+    if task.get("notification") is not None:
         await message.reply("Уже существует напоминание для этой задачи.")
         return
     logging.exception(f"\n\n{tasks}\n\n")
     try:
         try:
             task_deadline = datetime.strptime(task_deadline, "%Y-%m-%d %H:%M")
-            task_deadline = MOSCOW_TZ.localize(task_deadline).astimezone(pytz.UTC).isoformat()
+            task_deadline = (
+                MOSCOW_TZ.localize(task_deadline).astimezone(pytz.UTC).isoformat()
+            )
         except ValueError:
             await message.answer("Неверный формат даты. Используйте: YYYY-MM-DD HH:MM")
             return
 
-        
         resp = requests.post(
-            f"{TASK_SERVICE_URL}/notification_reminder", params={
+            f"{TASK_SERVICE_URL}/notification_reminder",
+            params={
                 "task_id": task_id,
                 "user_id": user_id,
                 "title": task["title"],
-                "date": task_deadline
-            }
+                "date": task_deadline,
+            },
         )
         logging.exception(f"\n\n{resp}\n\n")
         if resp.status_code == 200:
-            await message.reply(f"Напоминание по задаче \"{task["title"]}\" в {task_deadline} добавлено.")
+            await message.reply(
+                f'Напоминание по задаче "{task["title"]}" в {task_deadline} добавлено.'
+            )
         elif resp.status_code == 404:
             await message.reply("Задач с таким Id не найдено.")
         else:
@@ -416,23 +408,19 @@ async def delete_notification(message: types.Message):
     user_id = message.from_user.id
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.answer(
-            "Используйте формат: /delete_notification task_id"
-        )
+        await message.answer("Используйте формат: /delete_notification task_id")
         return
     ans = args[1]
     parts = ans.rsplit(maxsplit=2)
     if len(parts) != 1:
-        await message.answer(
-            "Используйте формат: /add_notification task_id"
-        )
+        await message.answer("Используйте формат: /add_notification task_id")
         return
     task_id = parts[0]
     tasks = requests.get(
         f"{TASK_SERVICE_URL}/tasks/{task_id}", params={"task_id": task_id}
     )
     logging.exception(f"\n\n{tasks.json()}\n\n")
-    if (len(tasks.json()) == 0):
+    if len(tasks.json()) == 0:
         await message.reply("Задач с таким Id не найдено.")
         return
     task = tasks.json()
@@ -443,13 +431,16 @@ async def delete_notification(message: types.Message):
     logging.exception(f"\n\n{tasks}\n\n")
     try:
         resp = requests.post(
-            f"{TASK_SERVICE_URL}/delete_notification_reminder", params={
+            f"{TASK_SERVICE_URL}/delete_notification_reminder",
+            params={
                 "task_id": task_id,
-            }
+            },
         )
         logging.exception(f"\n\n{resp}\n\n")
         if resp.status_code == 200:
-            await message.reply(f"Напоминание по задаче \"{task["title"]}\" было удалено.")
+            await message.reply(
+                f'Напоминание по задаче "{task["title"]}" было удалено.'
+            )
         elif resp.status_code == 404:
             await message.reply("Задач с таким Id не найдено.")
         else:

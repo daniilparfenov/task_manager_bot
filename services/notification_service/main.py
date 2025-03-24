@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Query, HTTPException
-from celery.result import AsyncResult
-import redis
-from config import REDIS_URL
 from datetime import datetime
-from celery_tasks import send_notification_reminder, send_overdue_deadline_reminder, celery_app
+
+import redis
+from celery.result import AsyncResult
+from celery_tasks import (celery_app, send_notification_reminder,
+                          send_overdue_deadline_reminder)
+from config import REDIS_URL
+from fastapi import FastAPI, HTTPException, Query
 
 app = FastAPI()
 redis_client = redis.from_url(REDIS_URL)
@@ -68,11 +70,8 @@ async def schedule_notification_reminder(
 ):
     """Добавляет задачу в очередь Celery с отложенным выполнением"""
     eta = datetime.fromisoformat(date)
-    task = send_notification_reminder.apply_async(
-        args=[user_id, title], eta=eta
-    )
+    task = send_notification_reminder.apply_async(args=[user_id, title], eta=eta)
 
     # Сохраняем соответствие task_id -> celery_task_id в Redis
     redis_client.set(f"notification{task_id}", task.id)
     return {"status": "scheduled", "task_id": task.id}
-

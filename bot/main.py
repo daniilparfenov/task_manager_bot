@@ -1,7 +1,8 @@
-import logging
 import asyncio
-from aiogram.types import BotCommand
+import logging
+
 from aiogram import Bot, Dispatcher
+from aiogram.types import BotCommand
 from config import API_TOKEN
 from handlers import register_handlers
 
@@ -23,6 +24,11 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="add_task", description="Добавить новую задачу"),
         BotCommand(command="update_task", description="Изменить существующую задачу"),
         BotCommand(command="delete_task", description="Удалить задачу"),
+        BotCommand(
+            command="delete_tasks_by_deadline", description="Удалить задачи по дедлайну"
+        ),
+        BotCommand(command="add_notification", description="Создать напоминание"),
+        BotCommand(command="delete_notification", description="Удалить напоминание"),
     ]
     await bot.set_my_commands(commands)
 

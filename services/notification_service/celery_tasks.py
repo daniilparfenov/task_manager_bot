@@ -1,7 +1,9 @@
-from celery import Celery
-import requests
 import os
-from config import REDIS_URL, TELEGRAM_API_TO_SEND_MESSAGE_URL, TASK_SERVICE_URL
+
+import requests
+from celery import Celery
+from config import (REDIS_URL, TASK_SERVICE_URL,
+                    TELEGRAM_API_TO_SEND_MESSAGE_URL)
 
 # Настройка Celery
 celery_app = Celery(
@@ -34,7 +36,7 @@ def send_overdue_deadline_reminder(user_id: str, task_id: str, title: str):
 def send_notification_reminder(user_id: str, title: str):
     """Отправка напоминания, которое захотел пользователь"""
 
-    text = f"🔔 Вы просили напомнить, что у вас скоро дедлайн по задаче \"{title}\"!!!"
+    text = f'🔔 Вы просили напомнить, что у вас скоро дедлайн по задаче "{title}"!!!'
     payload = {"chat_id": user_id, "text": text}
     try:
         response = requests.post(TELEGRAM_API_TO_SEND_MESSAGE_URL, json=payload)
